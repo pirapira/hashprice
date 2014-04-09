@@ -9,6 +9,7 @@ import Data.Scientific as Scientific
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Attoparsec.Number as AN
 import qualified Data.ByteString.Lazy as B
+import Network.HTTP.Conduit (simpleHttp)
 
 blockReward :: Block -> Int64
 blockReward block =
@@ -35,8 +36,11 @@ instance FromJSON Tick where
 jsonFile :: FilePath
 jsonFile = "./ticker.json"
 
+jsonURL :: String
+jsonURL = "https://blockchain.info/ticker"
+
 getJSON :: IO B.ByteString
-getJSON = B.readFile jsonFile
+getJSON = simpleHttp jsonURL
 
 tickerResult :: IO (Either String (HM.HashMap Text Value))
 tickerResult = (eitherDecode <$> getJSON)
