@@ -1,0 +1,20 @@
+Default: &defaults
+  database: hashprice.sqlite3
+  poolsize: 10
+
+Development:
+  <<: *defaults
+
+Testing:
+  database: hashprice_test.sqlite3
+  <<: *defaults
+
+Staging:
+  database: hashprice_staging.sqlite3
+  poolsize: 100
+  <<: *defaults
+
+Production:
+  database: hashprice_production.sqlite3
+  poolsize: 100
+  <<: *defaults

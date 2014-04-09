@@ -1,0 +1,27 @@
+hash-rate.json from https://blockchain.info/charts/hash-rate?showDataPoints=false&timespan=&show_header=true&daysAverageString=1&scale=0&format=json&address=
+fee.json from https://blockchain.info/charts/transaction-fees?showDataPoints=false&timespan=&show_header=true&daysAverageString=1&scale=0&format=json&address=
+block reward 50->25 happened at 2012-11-28
+
+
+ところで、そもそも何となにを比べるべきであろうか。
+
+So what.
+- difficulty: https://blockchain.info/q/getdifficulty
+- reward: should be calculatable from the height.  see reward.hs
+- fee: blockchain.info/rawblock
+- usdbtc: https://blockchain.info/ticker gives the price.
+
+So.  These are the things.
+What do we do?
+
+I would cache these values for 5 minutes or something.
+Actually, the cache can be just on memory.
+Or, on disk is possible.
+Maybe later I want to draw a graph or something.
+Then, on disk is preferrable.
+
+What would be the types?
+for blocks and for tickers.
+But now, it might be good to work on the code itself.
+
+
