@@ -6,7 +6,7 @@ Block
     time Int64 -- unix time
     UniqueHash hash
 Ticker
-    usdbtc Double
+    usdbtc Rational
 User
     ident Text
     password Text Maybe

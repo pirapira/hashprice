@@ -69,6 +69,8 @@ library
                  , fast-logger                   >= 2.1.4      && < 2.2
                  , wai-logger                    >= 2.1        && < 2.2
                  , unordered-containers          >= 0.2.3.0
+                 , attoparsec                    >= 0.11.2.1
+                 , scientific                    >= 0.2.0.2
 
 executable         hashprice
     if flag(library-only)

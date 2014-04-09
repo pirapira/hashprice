@@ -4,7 +4,10 @@ import Import
 import Data.Int (Int64)
 import Control.Monad (mzero)
 import Data.Aeson
+
+import Data.Scientific as Scientific
 import qualified Data.HashMap.Strict as HM
+import qualified Data.Attoparsec.Number as AN
 import qualified Data.ByteString.Lazy as B
 
 blockReward :: Block -> Int64
@@ -23,11 +26,7 @@ reward_ind height init =
 
 data TickResult = TickResult !Object deriving (Show)
 
-instance FromJSON TickResult where
-  parseJSON (Object v) = TickResult <$> v .: "USD"
-  parseJSON _ = mzero
-
-data Tick = Tick Text deriving (Show)
+data Tick = Tick Rational deriving (Show)
 
 instance FromJSON Tick where
   parseJSON (Object v) = Tick <$> v .: "last"
@@ -39,13 +38,32 @@ jsonFile = "./ticker.json"
 getJSON :: IO B.ByteString
 getJSON = B.readFile jsonFile
 
-tickerResult :: IO (Either String (HM.HashMap Text Text))
+tickerResult :: IO (Either String (HM.HashMap Text Value))
 tickerResult = (eitherDecode <$> getJSON)
 
-tick :: IO (Maybe Tick)
-tick = do
+tickL :: IO (Maybe Value)
+tickL = do
   outer <- tickerResult
   case outer of
     Left _ -> return $ Nothing
     Right out ->
-      return $ fmap Tick $ HM.lookup "last" out
+      return $ HM.lookup "USD" out
+
+l2v :: Value -> Maybe Value
+l2v (Object m) = HM.lookup "last" m
+l2v _ = Nothing
+
+v2t :: Value -> Maybe Tick
+v2t (Number n) = Just $ Tick $ toRational n
+v2t _ = Nothing
+
+l2t :: Value -> Maybe Tick
+l2t l = l2v l >>= v2t
+
+tick :: IO (Maybe Tick)
+tick = do
+  prev <- tickL
+  case prev of
+    Nothing -> return Nothing
+    Just p -> return $ l2t p
+
