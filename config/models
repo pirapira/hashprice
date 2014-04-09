@@ -1,3 +1,12 @@
+Block
+    hash Text
+    difficulty Double
+    fee Int64 -- in satoshi
+    height Int64
+    time Int64 -- unix time
+    UniqueHash hash
+Ticker
+    usdbtc Double
 User
     ident Text
     password Text Maybe
