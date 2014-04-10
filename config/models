@@ -5,8 +5,10 @@ Block
     height Int64
     time Int64 -- unix time
     UniqueHash hash
+    createdAt UTCTime
 Ticker
     usdbtc Rational
+    createdAt UTCTime
 User
     ident Text
     password Text Maybe
