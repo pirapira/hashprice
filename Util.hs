@@ -10,7 +10,9 @@ import Data.Aeson
 import Data.Time.Clock
 import Data.Text (unpack)
 import Network.HTTP.Types.URI (urlEncode)
+import Numeric (showEFloat, fromRat)
 
+import qualified Data.HashMap.Strict as HM
 import Data.Scientific as Scientific
 
 import qualified Data.Attoparsec.Number as AN
@@ -19,8 +21,8 @@ import Data.ByteString.Lex.Lazy.Double (readDouble)
 import qualified Data.ByteString as BS
 import Network.HTTP.Conduit (simpleHttp)
 
-blockReward :: Block -> Int64
-blockReward = reward . blockHeight
+blockReward :: Block -> Rational
+blockReward b = toRational (reward $ blockHeight b) / 100000000
 
 reward :: Int64 -> Int64
 reward height =
@@ -167,7 +169,7 @@ fetchBlock h = do
 fiveMinAgo :: Handler UTCTime
 fiveMinAgo = do
   curTime <- liftIO getCurrentTime
-  return $ addUTCTime (5 * 60) curTime
+  return $ addUTCTime (-5 * 60) curTime
 
 recentBlock :: Handler (Maybe Block)
 recentBlock = do
@@ -233,7 +235,8 @@ block = do
       lb <- liftIO lastB
       case lb of
         Nothing -> notFound
-        Just h -> fetchSaveBlock h
+        Just h -> do
+          hashBlock h
 
 data Hash = Hash Text deriving (Show, Eq)
 unHash :: Hash -> Text
@@ -288,7 +291,7 @@ hashBlock h = do
   found <- runDB $ selectFirst [BlockHash ==. unHash h] []
   case found of
     Just (Entity _ b) -> return b
-    _ -> getSaveBlock h -- obtain from blockchain.info here
+    _ -> fetchSaveBlock h -- obtain from blockchain.info here
 
 getSaveBlock :: Hash -> Handler Block
 getSaveBlock h = do
@@ -298,3 +301,19 @@ getSaveBlock h = do
     Just bb -> do
       _ <- saveBlock bb
       return bb
+
+totalHashUntilBlock :: Block -> Double
+totalHashUntilBlock b = blockDifficulty b * (2 ** 32)
+
+btcHash :: Block -> Rational
+btcHash b = ( blockReward b + ((toRational . blockFee) b / 100000000)) / (toRational $ totalHashUntilBlock b)
+
+hashPrice :: Block -> Tick -> Rational
+hashPrice b t = unTick t * btcHash b
+
+getPrice :: Handler String
+getPrice = do
+  b <- block
+  t <- tick
+  let s = hashPrice b t
+  return $ showEFloat (Just 3) (fromRat s) ""
