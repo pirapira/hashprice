@@ -1,22 +1,26 @@
 module Util where
 
--- use whateverTick
+-- use tick
+-- use lastBlock
 
 import Import
 import Data.Int (Int64)
 import Control.Monad (mzero)
 import Data.Aeson
 import Data.Time.Clock
+import Data.Text (unpack)
+import Network.HTTP.Types.URI (urlEncode)
 
 import Data.Scientific as Scientific
-import qualified Data.HashMap.Strict as HM
+
 import qualified Data.Attoparsec.Number as AN
 import qualified Data.ByteString.Lazy as B
+import Data.ByteString.Lex.Lazy.Double (readDouble)
+import qualified Data.ByteString as BS
 import Network.HTTP.Conduit (simpleHttp)
 
 blockReward :: Block -> Int64
-blockReward block =
-  reward $ blockHeight block
+blockReward = reward . blockHeight
 
 reward :: Int64 -> Int64
 reward height =
@@ -48,11 +52,29 @@ tickerURL = "https://blockchain.info/ticker"
 lastBlockURL :: String
 lastBlockURL = "https://blockchain.info/latestblock"
 
+rawBlockURL :: Hash -> String
+rawBlockURL h = "https://blockchain.info/rawblock/" ++ (unpack (unHash h)) -- dangerous
+
+-- urlEncodeString :: String -> String
+-- urlEncodeString = BS.unpack . urlEncode True . BS.pack
+
+difficultyURL :: String
+difficultyURL = "https://blockchain.info/q/getdifficulty"
+
 tickerJSON :: IO B.ByteString
 tickerJSON = simpleHttp tickerURL
 
 lastBlockJSON :: IO B.ByteString
 lastBlockJSON = simpleHttp lastBlockURL
+
+rawBlockJSON :: Hash -> IO B.ByteString
+rawBlockJSON = simpleHttp . rawBlockURL
+
+difficultyText :: IO B.ByteString
+difficultyText = simpleHttp difficultyURL
+
+rawBlockResult :: Hash -> IO (Either String (HM.HashMap Text Value))
+rawBlockResult h = eitherDecode <$> rawBlockJSON h
 
 tickerResult :: IO (Either String (HM.HashMap Text Value))
 tickerResult = eitherDecode <$> tickerJSON
@@ -72,8 +94,8 @@ v2t _ = Nothing
 l2t :: Value -> Maybe Tick
 l2t l = l2v l >>= v2t
 
-tick :: IO (Maybe Tick)
-tick = do
+fetchTick :: IO (Maybe Tick)
+fetchTick = do
   outer <- tickerResult
   case outer of
     Left _ -> return Nothing
@@ -82,19 +104,91 @@ tick = do
         Nothing -> return Nothing
         Just p -> return $ l2t p
 
+data RawBlock = RawBlock
+  { rawBlockHash :: Text
+  , rawBlockFee :: Int64
+  , rawBlockHeight :: Int64
+  , rawBlockTime :: Int64
+  }
+
+parseRawBlock :: HM.HashMap Text Value -> Maybe RawBlock
+parseRawBlock p = do
+  hashV <- look "hash"
+  hash <- readText hashV
+  feeV <- look "fee"
+  fee <- readNumber feeV
+  heightV <- look "height"
+  height <- readNumber heightV
+  timeV <- look "time"
+  time <- readNumber timeV
+  return $ RawBlock
+    { rawBlockHash = unHash hash
+    , rawBlockFee = fee
+    , rawBlockHeight = height
+    , rawBlockTime = time
+    }
+  where
+    look label = HM.lookup label p
+
+fetchRawBlock :: Hash -> IO (Maybe RawBlock)
+fetchRawBlock h = do
+  outer <- rawBlockResult h
+  case outer of
+    Left _ -> return Nothing
+    Right out ->
+      return $ parseRawBlock out
+
+fetchDifficulty :: IO (Maybe Double)
+fetchDifficulty = do
+   str <- difficultyText
+   case readDouble str of
+     Nothing -> return Nothing
+     Just (d, _) -> return $ Just d
+
+fetchBlock :: Hash -> IO (Maybe Block)
+fetchBlock h = do
+  current <- getCurrentTime
+  fR <- fetchRawBlock h
+  fD <- fetchDifficulty
+  case (fR, fD) of
+    (Nothing, _) -> return Nothing
+    (_, Nothing) -> return Nothing
+    (Just rb, Just diff) -> do
+      return $ Just
+        $ Block
+        { blockHash = rawBlockHash rb
+        , blockDifficulty = diff
+        , blockFee = rawBlockFee rb
+        , blockHeight = rawBlockHeight rb
+        , blockTime = rawBlockTime rb
+        , blockCreatedAt = current
+        }
+
 fiveMinAgo :: Handler UTCTime
 fiveMinAgo = do
   curTime <- liftIO getCurrentTime
   return $ addUTCTime (5 * 60) curTime
+
+recentBlock :: Handler (Maybe Block)
+recentBlock = do
+  thr <- fiveMinAgo
+  result <- runDB $ selectFirst [BlockCreatedAt >=. thr] [Desc BlockCreatedAt]
+  case result of
+    Nothing -> return Nothing
+    Just (Entity _ b) ->
+      return $ Just b
 
 recentTick :: Handler (Maybe Tick)
 recentTick = do
   thr <- fiveMinAgo
   result <- runDB $ selectFirst [TickerCreatedAt >=. thr] [Desc TickerCreatedAt]
   case result of
-    Nothing -> return $ Nothing
+    Nothing -> return Nothing
     Just (Entity _ ticker) ->
       return $ Just $ Tick (tickerUsdbtc ticker)
+
+saveBlock :: Block -> Handler BlockId
+saveBlock b = runDB $ insert b
 
 saveTick :: Tick -> Handler TickerId
 saveTick t = do
@@ -105,26 +199,49 @@ saveTick t = do
     , tickerCreatedAt = current
     }
 
-getSaveTick :: Handler Tick
-getSaveTick = do
-  t <- liftIO tick
+fetchSaveBlock :: Hash -> Handler Block
+fetchSaveBlock h = do
+  b <- liftIO $ fetchBlock h
+  case b of
+    Nothing -> notFound
+    Just bl -> do
+      _ <- saveBlock bl
+      return bl
+
+fetchSaveTick :: Handler Tick
+fetchSaveTick = do
+  t <- liftIO fetchTick
   case t of
     Nothing -> notFound
     Just tic -> do
       _ <- saveTick tic
       return tic
 
-whateverTick :: Handler Tick
-whateverTick = do
+tick :: Handler Tick
+tick = do
   recent <- recentTick
-  recentJust <- case recent of
-              Just tic -> return tic
-              Nothing -> getSaveTick
-  return recentJust
+  case recent of
+    Just tic -> return tic
+    Nothing -> fetchSaveTick
+
+block :: Handler Block
+block = do
+  recent <- recentBlock
+  case recent of
+    Just bl -> return bl
+    Nothing -> do
+      lb <- liftIO lastB
+      case lb of
+        Nothing -> notFound
+        Just h -> fetchSaveBlock h
 
 data Hash = Hash Text deriving (Show, Eq)
 unHash :: Hash -> Text
 unHash (Hash h) = h
+
+readNumber :: Value -> Maybe Int64
+readNumber (Number n) = Just $ round n
+readNumber _ = Nothing
 
 readText :: Value -> Maybe Hash
 readText (String t) = Just $ Hash t
@@ -141,7 +258,13 @@ lastB = do
         Just p -> return $ readText p
 
 savelb :: Hash -> Handler LastBlockId
-savelb = undefined
+savelb h = do
+  current <- liftIO getCurrentTime
+  runDB $ insert
+    $ LastBlock
+    { lastBlockHash = unHash h
+    , lastBlockObtainedAt = current
+    }
 
 getSaveLastBlock :: Handler Hash
 getSaveLastBlock = do
@@ -160,12 +283,18 @@ lastBlock = do
     Just (Entity _ lb) -> return $ Hash $ lastBlockHash lb
     Nothing -> getSaveLastBlock
 
-block :: Hash -> Handler Block
-block h = do
+hashBlock :: Hash -> Handler Block
+hashBlock h = do
   found <- runDB $ selectFirst [BlockHash ==. unHash h] []
   case found of
     Just (Entity _ b) -> return b
     _ -> getSaveBlock h -- obtain from blockchain.info here
 
 getSaveBlock :: Hash -> Handler Block
-getSaveBlock h = undefined
+getSaveBlock h = do
+  b <- liftIO (fetchBlock h)
+  case b of
+    Nothing -> notFound
+    Just bb -> do
+      _ <- saveBlock bb
+      return bb
