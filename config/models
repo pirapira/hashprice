@@ -1,3 +1,6 @@
+LastBlock
+    hash Text
+    obtainedAt UTCTime
 Block
     hash Text
     difficulty Double

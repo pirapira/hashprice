@@ -39,25 +39,27 @@ instance FromJSON Tick where
   parseJSON (Object v) = Tick <$> v .: "last"
   parseJSON _ = mzero
 
-jsonFile :: FilePath
-jsonFile = "./ticker.json"
+-- jsonFile :: FilePath
+-- jsonFile = "./ticker.json"
 
-jsonURL :: String
-jsonURL = "https://blockchain.info/ticker"
+tickerURL :: String
+tickerURL = "https://blockchain.info/ticker"
 
-getJSON :: IO B.ByteString
-getJSON = simpleHttp jsonURL
+lastBlockURL :: String
+lastBlockURL = "https://blockchain.info/latestblock"
+
+tickerJSON :: IO B.ByteString
+tickerJSON = simpleHttp tickerURL
+
+lastBlockJSON :: IO B.ByteString
+lastBlockJSON = simpleHttp lastBlockURL
 
 tickerResult :: IO (Either String (HM.HashMap Text Value))
-tickerResult = (eitherDecode <$> getJSON)
+tickerResult = eitherDecode <$> tickerJSON
 
-tickL :: IO (Maybe Value)
-tickL = do
-  outer <- tickerResult
-  case outer of
-    Left _ -> return $ Nothing
-    Right out ->
-      return $ HM.lookup "USD" out
+lastBlockResult :: IO (Either String (HM.HashMap Text Value))
+lastBlockResult = eitherDecode <$> lastBlockJSON
+
 
 l2v :: Value -> Maybe Value
 l2v (Object m) = HM.lookup "last" m
@@ -72,10 +74,13 @@ l2t l = l2v l >>= v2t
 
 tick :: IO (Maybe Tick)
 tick = do
-  prev <- tickL
-  case prev of
-    Nothing -> return Nothing
-    Just p -> return $ l2t p
+  outer <- tickerResult
+  case outer of
+    Left _ -> return Nothing
+    Right out ->
+      case HM.lookup "USD" out of
+        Nothing -> return Nothing
+        Just p -> return $ l2t p
 
 fiveMinAgo :: Handler UTCTime
 fiveMinAgo = do
@@ -104,7 +109,7 @@ getSaveTick :: Handler Tick
 getSaveTick = do
   t <- liftIO tick
   case t of
-    Nothing -> redirect $ HomeR
+    Nothing -> notFound
     Just tic -> do
       _ <- saveTick tic
       return tic
@@ -117,3 +122,50 @@ whateverTick = do
               Nothing -> getSaveTick
   return recentJust
 
+data Hash = Hash Text deriving (Show, Eq)
+unHash :: Hash -> Text
+unHash (Hash h) = h
+
+readText :: Value -> Maybe Hash
+readText (String t) = Just $ Hash t
+readText _ = Nothing
+
+lastB :: IO (Maybe Hash)
+lastB = do
+  outer <- lastBlockResult
+  case outer of
+    Left _ -> return Nothing
+    Right out ->
+      case HM.lookup "hash" out of
+        Nothing -> return Nothing
+        Just p -> return $ readText p
+
+savelb :: Hash -> Handler LastBlockId
+savelb = undefined
+
+getSaveLastBlock :: Handler Hash
+getSaveLastBlock = do
+  l <- liftIO lastB
+  case l of
+    Nothing -> notFound
+    Just lb -> do
+      _ <- savelb lb
+      return lb
+
+lastBlock :: Handler Hash
+lastBlock = do
+  thr <- fiveMinAgo
+  found <- runDB $ selectFirst [LastBlockObtainedAt >=. thr] [Desc LastBlockObtainedAt]
+  case found of
+    Just (Entity _ lb) -> return $ Hash $ lastBlockHash lb
+    Nothing -> getSaveLastBlock
+
+block :: Hash -> Handler Block
+block h = do
+  found <- runDB $ selectFirst [BlockHash ==. unHash h] []
+  case found of
+    Just (Entity _ b) -> return b
+    _ -> getSaveBlock h -- obtain from blockchain.info here
+
+getSaveBlock :: Hash -> Handler Block
+getSaveBlock h = undefined
