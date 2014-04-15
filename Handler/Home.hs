@@ -25,3 +25,8 @@ sampleForm :: Form (FileInfo, Text)
 sampleForm = renderDivs $ (,)
     <$> fileAFormReq "Choose a file"
     <*> areq textField "What's on the file?" Nothing
+
+getPlainR :: Handler RepPlain
+getPlainR = do
+  price <- getPrice
+  return $ RepPlain $ toContent price
