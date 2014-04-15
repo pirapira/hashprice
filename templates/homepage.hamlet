@@ -1,4 +1,5 @@
 <h1>HashPrice
 <p>One hash is worth #{price} USD.</p>
 <p><a href=@{PlainR}>plain API</a></p>
+<p><a href="https://twitter.com/hash_price">twitter</a></p>
 <p><a href="https://github.com/pirapira/hashprice">github</a></p>
